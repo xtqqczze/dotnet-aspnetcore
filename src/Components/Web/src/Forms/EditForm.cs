@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Diagnostics;
+using Microsoft.AspNetCore.Components.Forms.ClientValidation;
 using Microsoft.AspNetCore.Components.Forms.Mapping;
 using Microsoft.AspNetCore.Components.Rendering;
 
@@ -167,7 +168,15 @@ public class EditForm : ComponentBase
         builder.OpenComponent<CascadingValue<EditContext>>(7);
         builder.AddComponentParameter(7, "IsFixed", true);
         builder.AddComponentParameter(8, "Value", _editContext);
-        builder.AddComponentParameter(9, "ChildContent", ChildContent?.Invoke(_editContext));
+        builder.AddComponentParameter(9, "ChildContent", (RenderFragment)(childBuilder =>
+        {
+            if (ChildContent != null)
+            {
+                childBuilder.AddContent(0, ChildContent(_editContext));
+            }
+            childBuilder.OpenComponent<ClientValidationData>(1);
+            childBuilder.CloseComponent();
+        }));
         builder.CloseComponent();
 
         builder.CloseElement();
