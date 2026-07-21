@@ -52,8 +52,6 @@ public sealed class Virtualize<TItem> : ComponentBase, IVirtualizeJsCallbacks, I
 
     private bool CanDetectPrepend => _previousFirstLoadedItem is not null;
 
-    private bool _itemComparerExplicitlySet;
-
     private CancellationTokenSource? _refreshCts;
 
     private CancellationTokenSource? _currentScrollCts;
@@ -186,9 +184,9 @@ public sealed class Virtualize<TItem> : ComponentBase, IVirtualizeJsCallbacks, I
     /// (e.g., <c>Id</c>); otherwise reference-equality fallback would produce false-positive
     /// prepend detection when the provider returns fresh instances.
     ///
-    /// Prepend detection only runs when this parameter is explicitly assigned by the consumer.
     /// The <c>BL0011</c> analyzer warns when <see cref="ItemsProvider"/> is used without an
-    /// explicit <see cref="ItemComparer"/> assignment.
+    /// explicit <see cref="ItemComparer"/> assignment, because the default comparer falls back to
+    /// reference equality for classes without value-equality semantics.
     ///
     /// For in-memory <see cref="Items"/>, this parameter is not needed because the component
     /// can detect prepends using object identity.
@@ -197,11 +195,7 @@ public sealed class Virtualize<TItem> : ComponentBase, IVirtualizeJsCallbacks, I
     public IEqualityComparer<TItem> ItemComparer
     {
         get => _itemComparer;
-        set
-        {
-            _itemComparer = value;
-            _itemComparerExplicitlySet = true;
-        }
+        set => _itemComparer = value;
     }
 
     /// <summary>
@@ -564,7 +558,7 @@ public sealed class Virtualize<TItem> : ComponentBase, IVirtualizeJsCallbacks, I
                 _itemTemplate(item)(builder);
                 _lastRenderedItemCount++;
 
-                if (isFirstRenderedItem && _itemComparerExplicitlySet && _itemsProvider != DefaultItemsProvider)
+                if (isFirstRenderedItem && _itemsProvider != DefaultItemsProvider)
                 {
                     _previousFirstLoadedItem = item;
                     isFirstRenderedItem = false;
@@ -863,7 +857,7 @@ public sealed class Virtualize<TItem> : ComponentBase, IVirtualizeJsCallbacks, I
                     _pendingScrollToBottom = true;
                 }
             }
-            else if (itemsAdded && !isDefaultProvider && _itemComparerExplicitlySet && CanDetectPrepend)
+            else if (itemsAdded && !isDefaultProvider && CanDetectPrepend)
             {
                 using var enumerator = result.Items.GetEnumerator();
                 if (enumerator.MoveNext())
@@ -964,6 +958,7 @@ public sealed class Virtualize<TItem> : ComponentBase, IVirtualizeJsCallbacks, I
     // chase the new items via spacer redistribution.
     private bool ShouldAnchorForAppend(int countDelta, int previousItemCount)
         => countDelta > 0
+            && countDelta < previousItemCount
             && (AnchorMode & VirtualizeAnchorMode.End) == 0
             && _itemsBefore + _visibleItemCapacity >= previousItemCount;
 
