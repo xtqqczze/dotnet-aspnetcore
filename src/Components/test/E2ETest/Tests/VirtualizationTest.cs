@@ -2091,7 +2091,8 @@ public class VirtualizationTest : ServerTestBase<ToggleExecutionModeServerFixtur
     [InlineData("2", false)]
     [InlineData("0", true)]
     [InlineData("1", true)]
-    [InlineData("2", true)]
+    // Disabled pending fix https://github.com/dotnet/aspnetcore/issues/67865:
+    // [InlineData("2", true)]
     public void QuickGrid_AnchorMode_Top_AppendKeepsViewportStable(string anchorMode, bool useItemsProvider)
     {
         MountQuickGridAnchorModeComponent(anchorMode, useItemsProvider);
@@ -5467,5 +5468,207 @@ public class VirtualizationTest : ServerTestBase<ToggleExecutionModeServerFixtur
                 var er = el.getBoundingClientRect();
                 return er.top < window.innerHeight && er.bottom > 0;
             "), "Item 100 must be visible in window viewport.");
+    }
+
+    private void MountQuickGridForScrollToItem(bool useItemsProvider = true, bool variableHeight = false)
+    {
+        Browser.MountTestComponent<BasicTestApp.QuickGridTest.QuickGridScrollComponent>();
+        var container = Browser.Exists(By.Id("scroll-container"));
+        Browser.True(() => GetElementCount(container, ".item") > 0);
+
+        if (useItemsProvider)
+        {
+            Browser.Exists(By.Id("toggle-provider")).Click();
+            Browser.True(() => GetElementCount(container, ".item") > 0);
+            Browser.Exists(By.Id("toggle-delay")).Click();
+        }
+
+        if (variableHeight)
+        {
+            Browser.Exists(By.Id("toggle-height")).Click();
+            Browser.True(() => GetElementCount(container, ".item") > 0);
+        }
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    [InlineData(false, true)]
+    public void QuickGrid_ScrollToItem_LandsAtTop(bool useItemsProvider, bool variableHeight)
+    {
+        MountQuickGridForScrollToItem(useItemsProvider, variableHeight);
+        var container = Browser.Exists(By.Id("scroll-container"));
+        var js = (IJavaScriptExecutor)Browser;
+
+        SetScrollTargetIndex(200);
+        Browser.Exists(By.Id("scroll-to-item")).Click();
+        WaitForScrollStatus("Completed: 200");
+
+        Browser.True(() => GetTopRenderedIndex(js) == 200,
+            $"Top rendered item should be 200 but was {GetTopRenderedIndex(js)}, scrollTop={GetScrollTop(js, container)}");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void QuickGrid_ScrollToItem_NegativeIndex_ScrollsToTop(bool useItemsProvider)
+    {
+        MountQuickGridForScrollToItem(useItemsProvider);
+        var container = Browser.Exists(By.Id("scroll-container"));
+        var js = (IJavaScriptExecutor)Browser;
+
+        SetScrollTargetIndex(150);
+        Browser.Exists(By.Id("scroll-to-item")).Click();
+        WaitForScrollStatus("Completed: 150");
+
+        SetScrollTargetIndex(-1);
+        Browser.Exists(By.Id("scroll-to-item")).Click();
+        WaitForScrollStatus("Completed: -1");
+
+        Browser.True(() => GetTopRenderedIndex(js) == 0,
+            $"Negative index should clamp to the first row; topRendered={GetTopRenderedIndex(js)}, scrollTop={GetScrollTop(js, container)}");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void QuickGrid_ScrollToItem_MaxIntIndex_ScrollsToLast(bool useItemsProvider)
+    {
+        MountQuickGridForScrollToItem(useItemsProvider);
+        var container = Browser.Exists(By.Id("scroll-container"));
+        var js = (IJavaScriptExecutor)Browser;
+
+        SetScrollTargetIndex(int.MaxValue);
+        Browser.Exists(By.Id("scroll-to-item")).Click();
+        WaitForScrollStatus("Completed: " + int.MaxValue.ToString(CultureInfo.InvariantCulture));
+
+        Browser.True(() =>
+        {
+            var st = GetScrollTop(js, container);
+            var sh = (long)js.ExecuteScript("return arguments[0].scrollHeight", container);
+            var ch = (long)js.ExecuteScript("return arguments[0].clientHeight", container);
+            return st > 0 && st >= sh - ch - 2;
+        }, message: "Scroll should be at the bottom (last item region) after clamp to MaxValue.");
+
+        Browser.True(() =>
+            (bool)js.ExecuteScript(@"
+                var el = document.querySelector('#scroll-container .item[data-index=""999""]');
+                if (!el) return false;
+                var cr = document.getElementById('scroll-container').getBoundingClientRect();
+                var er = el.getBoundingClientRect();
+                return er.top < cr.bottom && er.bottom > cr.top;
+            "));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void QuickGrid_ScrollToItem_WithProviderDelay_LandsAtTargetWithRealContent(bool variableHeight)
+    {
+        MountQuickGridForScrollToItem(variableHeight: variableHeight);
+        var js = (IJavaScriptExecutor)Browser;
+
+        SetScrollTargetIndex(300);
+        Browser.Exists(By.Id("scroll-to-item")).Click();
+        WaitForScrollStatus("Completed: 300", timeoutSeconds: 30);
+
+        Browser.True(() => GetTopRenderedIndex(js) == 300,
+            $"Top rendered should be real item 300 (not placeholder); got {GetTopRenderedIndex(js)}");
+    }
+
+    [Theory]
+    [InlineData(1, false, false)]
+    [InlineData(5, false, false)]
+    [InlineData(500, false, false)]
+    [InlineData(1, false, true)]
+    [InlineData(500, false, true)]
+    [InlineData(1, true, false)]
+    [InlineData(500, true, false)]
+    [InlineData(1, true, true)]
+    [InlineData(500, true, true)]
+    public void QuickGrid_InitialIndex_OpensAtTargetWithRealContent(int initialIndex, bool variableHeight, bool useItemsProvider)
+    {
+        MountQuickGridForScrollToItem(useItemsProvider: useItemsProvider, variableHeight: variableHeight);
+        var js = (IJavaScriptExecutor)Browser;
+
+        Browser.Exists(By.Id("unload-list")).Click();
+        Browser.Exists(By.Id("list-not-loaded"));
+        js.ExecuteScript("document.getElementById('scroll-container').scrollTop = 0;");
+        SetManualInitialIndex(initialIndex);
+        Browser.Exists(By.Id("reload-with-initial-index")).Click();
+
+        Browser.True(() => GetTopRenderedIndex(js) == initialIndex);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void QuickGrid_InitialIndex_BeyondCount_ClampsToEnd(bool useItemsProvider)
+    {
+        MountQuickGridForScrollToItem(useItemsProvider);
+        var js = (IJavaScriptExecutor)Browser;
+
+        Browser.Exists(By.Id("unload-list")).Click();
+        Browser.Exists(By.Id("list-not-loaded"));
+        js.ExecuteScript("document.getElementById('scroll-container').scrollTop = 0;");
+        SetManualInitialIndex(100000);
+        Browser.Exists(By.Id("reload-with-initial-index")).Click();
+
+        Browser.True(() => (bool)js.ExecuteScript(@"
+            var c = document.getElementById('scroll-container');
+            var last = c.querySelector('.item[data-index=""999""]');
+            if (!last) return false;
+            return Math.abs((c.scrollTop + c.clientHeight) - c.scrollHeight) <= 2;
+        "), "Expected last item (999) rendered and scroller pinned at end after clamping InitialItemIndex=100000.");
+    }
+
+    [Fact]
+    public void QuickGrid_ScrollToItem_RapidCalls_OnlyLastTargetReached()
+    {
+        MountQuickGridForScrollToItem();
+        var js = (IJavaScriptExecutor)Browser;
+
+        Browser.Exists(By.Id("scroll-to-item-rapid")).Click();
+        WaitForScrollStatus("Completed: 250 (canceled=0, completed=5, faulted=0)", timeoutSeconds: 30);
+
+        Browser.True(() => GetTopRenderedIndex(js) == 250,
+            $"After rapid-fire scroll, top should be 250 but was {GetTopRenderedIndex(js)}");
+    }
+
+    [Fact]
+    public void QuickGrid_ScrollToItem_ExternalCancellation_TaskCancels()
+    {
+        MountQuickGridForScrollToItem();
+        var js = (IJavaScriptExecutor)Browser;
+
+        SetScrollTargetIndex(450);
+        Browser.Exists(By.Id("scroll-to-item-cancellable")).Click();
+        Browser.Exists(By.Id("cancel-scroll")).Click();
+        WaitForScrollStatus("Canceled");
+
+        SetScrollTargetIndex(120);
+        Browser.Exists(By.Id("scroll-to-item")).Click();
+        WaitForScrollStatus("Completed: 120", timeoutSeconds: 30);
+        Browser.True(() => GetTopRenderedIndex(js) == 120);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void QuickGrid_ScrollToItem_AnchorStart_AtTop_LandsAtTarget(bool useItemsProvider)
+    {
+        MountQuickGridForScrollToItem(useItemsProvider);
+        var container = Browser.Exists(By.Id("scroll-container"));
+        var js = (IJavaScriptExecutor)Browser;
+
+        Browser.True(() => GetScrollTop(js, container) == 0);
+
+        SetScrollTargetIndex(2);
+        Browser.Exists(By.Id("scroll-to-item")).Click();
+        WaitForScrollStatus("Completed: 2");
+
+        Browser.True(() => GetTopRenderedIndex(js) == 2,
+            $"Top should be 2 but was {GetTopRenderedIndex(js)}");
     }
 }

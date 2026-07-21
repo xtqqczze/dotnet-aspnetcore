@@ -523,6 +523,8 @@ function init(dotNetHelper: DotNet.DotNetObject, spacerBefore: HTMLElement, spac
 
   // Measures the target's viewport-relative top and aligns it to containerTop.
   function alignToItemAt(localIndex: number): void {
+    // Target row should be measured against the committed window, not a stale spacer height.
+    flushPendingStyleMutations();
     const delta = measureLocalChildOffset(localIndex);
     if (Number.isNaN(delta)) {
       // Items aren't in DOM yet. Retry after the next render commit.
